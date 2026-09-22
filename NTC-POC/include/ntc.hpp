@@ -11,15 +11,17 @@ namespace cvl
 constexpr gpio_num_t NTC_ADC_GPIO = GPIO_NUM_6;
 
 constexpr float R_FIXED_OHMS = 10000.0f;  // R5
-constexpr float ADJUST_OHMS  =  1487.0f;  // R5
 constexpr float NTC_R25_OHMS = 10000.0f;  // PANW 103395-395
 constexpr float NTC_BETA_K   = 3950.0f;
 constexpr float T25_K        = 298.15f;
 constexpr float ADJUST_K     = 0.0f;
 //                           = 3.0f;
 
-constexpr uint16_t ADC_MAX_COUNTS = 4095;
-constexpr uint8_t  SAMPLE_COUNT   = 32;
+constexpr uint16_t ADC_MAX_COUNTS    = 4095;
+constexpr uint32_t REF_MILLIVOLTS    = 3300; 
+constexpr uint16_t ADC_ADJUST        = 0; // 166;
+constexpr uint8_t  SAMPLE_COUNT      = 32;
+constexpr uint32_t SAMPLE_RATE_MICRO = 100;
 
 // Conservative circuit/wiring diagnosis thresholds.
 // Tune after collecting actual raw readings on production hardware.
@@ -38,9 +40,13 @@ struct Reading
 {
     Status status;
     uint16_t rawCounts;
+    uint32_t rawMillivolts;
     float ntcOhms;
+    float ntcOhmsCal;
     float celsius;
+    float celsiusCal;
     float fahrenheit;
+    float fahrenheitCal;
 };
 
 inline const char* statusText(Status status)
@@ -70,34 +76,40 @@ void setup()
     pinMode(static_cast<uint8_t>(NTC_ADC_GPIO), INPUT);
 }
 
-inline uint16_t readRawAveraged()
+inline void readRawAveraged(Reading &reading)
 {
+    reading = {};
+
     // Discard the first conversion after switching from another ADC input.
-    (void)analogRead(static_cast<uint8_t>(NTC_ADC_GPIO));
+    analogRead(NTC_ADC_GPIO);
+    analogReadMilliVolts(NTC_ADC_GPIO);
 
-    uint32_t sum = 0;
-
+    uint32_t sum = 0, sumMillivolts = 0;
     for (uint8_t i = 0; i < SAMPLE_COUNT; ++i)
 	{
-        sum += analogRead(static_cast<uint8_t>(NTC_ADC_GPIO));
-        delayMicroseconds(100);
+        sum += analogRead(NTC_ADC_GPIO) + ADC_ADJUST;
+        sumMillivolts += analogReadMilliVolts(NTC_ADC_GPIO);
+        delayMicroseconds(SAMPLE_RATE_MICRO);
     }
 
-    return static_cast<uint16_t>((sum + SAMPLE_COUNT / 2) / SAMPLE_COUNT);
+    //turn static_cast<uint16_t>((sum + SAMPLE_COUNT / 2) / SAMPLE_COUNT);
+    reading.rawCounts = static_cast<uint16_t>(sum / SAMPLE_COUNT);
+    reading.rawMillivolts = static_cast<uint32_t>(sumMillivolts / SAMPLE_COUNT);
 }
 
 inline Reading read()
 {
     Reading result {};
-    result.rawCounts = readRawAveraged();
+    readRawAveraged(result);
 
     // In this circuit, an open probe produces a low ADC value because R5
     // pulls NTC_ADC to ground.
     if (result.rawCounts <= ADC_LOW_FAULT_COUNTS) {
         result.status = Status::OpenOrLowSideFault;
         result.ntcOhms = INFINITY;
-        result.celsius = NAN;
-        result.fahrenheit = NAN;
+        result.ntcOhmsCal = INFINITY;
+        result.celsius = result.celsiusCal = NAN;
+        result.fahrenheit = result.fahrenheitCal = NAN;
         return result;
     }
 
@@ -106,12 +118,14 @@ inline Reading read()
     if (result.rawCounts >= ADC_HIGH_FAULT_COUNTS) {
         result.status = Status::ShortTo3V3OrOverrange;
         result.ntcOhms = 0.0f;
-        result.celsius = NAN;
-        result.fahrenheit = NAN;
+        result.ntcOhmsCal = 0.0f;
+        result.celsius = result.celsiusCal = NAN;
+        result.fahrenheit = result.fahrenheitCal = NAN;
         return result;
     }
 
     const float adc = static_cast<float>(result.rawCounts);
+    const float mV = static_cast<float>(result.rawMillivolts);
 
     // Correct equation for this schematic:
     //
@@ -132,12 +146,17 @@ inline Reading read()
     result.ntcOhms =
     (
         ( R_FIXED_OHMS ) * adc / (static_cast<float>(ADC_MAX_COUNTS) - adc )
-    ) + ADJUST_OHMS;
+    );
+    result.ntcOhmsCal =
+    (
+        ( R_FIXED_OHMS ) * mV / (static_cast<float>(REF_MILLIVOLTS) - mV )
+    );
 
-    if (!isfinite(result.ntcOhms) || result.ntcOhms <= 0.0f) {
+    if (!isfinite(result.ntcOhms) || result.ntcOhms <= 0.0f)
+    {
         result.status = Status::Invalid;
-        result.celsius = NAN;
-        result.fahrenheit = NAN;
+        result.celsius = result.celsiusCal = NAN;
+        result.fahrenheit = result.fahrenheitCal = NAN;
         return result;
     }
 
@@ -145,11 +164,18 @@ inline Reading read()
         (1.0f / T25_K) +
         (logf(result.ntcOhms / NTC_R25_OHMS) / NTC_BETA_K);
 
+    const float inverseTemperatureK_Cal =
+        (1.0f / T25_K) +
+        (logf(result.ntcOhmsCal / NTC_R25_OHMS) / NTC_BETA_K);
+
     const float kelvin = 1.0f / inverseTemperatureK + ADJUST_K;
+    const float kelvinCal = 1.0f / inverseTemperatureK_Cal;
 
     result.status = Status::Ok;
     result.celsius = kelvin - 273.15f;
+    result.celsiusCal = kelvinCal - 273.15f;
     result.fahrenheit = result.celsius * 1.8f + 32.0f;
+    result.fahrenheitCal = result.celsiusCal * 1.8f + 32.0f;
 
     return result;
 }

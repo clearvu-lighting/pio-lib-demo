@@ -13,11 +13,16 @@ void loop()
     if (temperature.status == cvl::Status::Ok)
 	{
         Serial.printf(
-            "Temp: %.2f C / %.2f F, NTC = %.3f Kohm, ADC = %u\n",
+            "Temp: \n\tRaw: %.2f C / %.2f F, NTC = %.3f Kohm, ADC = %u"
+            "      \n\tCal: %.2f C / %.2f F, NTC = %.3f Kohm, volts = %.3f\n",
             temperature.celsius,
             temperature.fahrenheit,
             temperature.ntcOhms/1000,
-            temperature.rawCounts
+            temperature.rawCounts,
+            temperature.celsiusCal,
+            temperature.fahrenheitCal,
+            temperature.ntcOhmsCal/1000,
+            ( temperature.rawMillivolts / 1000.0 )
         );
     }
 	else
