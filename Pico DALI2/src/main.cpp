@@ -55,7 +55,7 @@ void loop()
 			Luminaire_Brightness( intensity * downlight , downlight_addr );
 		}
 	}
-	else
+	else if( DALI_NUM == 0 )
 	{
 		printf("DALI device scan found no devices.\r\n");
 	}

@@ -1,0 +1,8 @@
+[submodule "mag-switch-isr/lib/cvl"]
+	path = mag-switch-isr/lib/cvl
+	url = https://github.com/clearvu-lighting/pio-lib-thread.git
+	branch = main
+[submodule "mag-switch-isr/src/cvl"]
+	path = mag-switch-isr/src/cvl
+	url = https://github.com/clearvu-lighting/pio-lib-thread.git
+	branch = main
